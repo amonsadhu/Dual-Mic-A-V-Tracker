@@ -1,0 +1,72 @@
+# Embedded Pipeline (ESP32 C++)
+This code snippet focuses on I2S (Inter-IC Sound) setup, which is the standard way to get high-speed audio data into the ESP32, and then sending the data/result over Serial.
+
+// ESP32-S3/C3 (IDF/Arduino) C++ Snippet for I2S Audio Capture
+
+#include "driver/i2s.h"
+#include "esp_log.h"
+
+// Configuration constants (adjust for your specific I2S/Mic setup)
+#define I2S_PORT            I2S_NUM_0
+#define I2S_BCLK_PIN        GPIO_NUM_32 // Example GPIOs
+#define I2S_LRCK_PIN        GPIO_NUM_33
+#define I2S_DATA_PIN        GPIO_NUM_34
+#define SAMPLE_RATE         44100       // Must match the DSP code
+#define I2S_CHANNEL_NUM     2           // Dual mic (stereo mode)
+#define BUFFER_SIZE_SAMPLES 1024        // Size of the capture buffer
+
+// Global buffer to hold the raw audio data
+int32_t raw_i2s_samples[BUFFER_SIZE_SAMPLES * I2S_CHANNEL_NUM];
+
+void i2s_init() {
+    i2s_config_t i2s_config = {
+        .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX), // Master RX
+        .sample_rate = SAMPLE_RATE,
+        .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT, // Typical for PDM/Delta-Sigma Mics
+        .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT, // Separate channels
+        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+        .intr_alloc_flags = 0, // Default interrupt priority
+        .dma_buf_count = 8,
+        .dma_buf_len = 64, // DMA buffer size in samples
+        .use_apll = false
+    };
+
+    i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
+
+    i2s_pin_config_t pin_config = {
+        .bclk_io_num = I2S_BCLK_PIN,
+        .ws_io_num = I2S_LRCK_PIN,
+        .data_in_io_num = I2S_DATA_PIN,
+        .data_out_io_num = I2S_PIN_NO_CHANGE // RX only
+    };
+
+    i2s_set_pin(I2S_PORT, &pin_config);
+}
+
+void setup() {
+    Serial.begin(115200);
+    i2s_init();
+    // Initialize ESP32-CAM here (or use the separate CAM example code)
+}
+
+void loop() {
+    size_t bytes_read = 0;
+    
+    // Read a block of audio data from I2S
+    i2s_read(I2S_PORT, raw_i2s_samples, sizeof(raw_i2s_samples), &bytes_read, portMAX_DELAY);
+
+    if (bytes_read > 0) {
+        // Simple Example: Send the calculated Angle of Arrival (AOA)
+        // **In a real system, the GCC-PHAT DSP would be implemented here in C/C++**
+        
+        // --- Placeholder for TDOA/AOA Calculation ---
+        float calculated_aoa = 45.0; // Assume AOA was calculated in C++ DSP
+        
+        // Send a simple, parsable string to the host PC
+        Serial.printf("AOA:%f\n", calculated_aoa); 
+        // Example output: AOA:45.000000
+
+        // If a new video frame is ready from ESP32-CAM, send its ID/Timestamp too.
+    }
+}
+
