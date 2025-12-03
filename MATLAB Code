@@ -1,0 +1,65 @@
+# Dual-Mic-A-V-Tracker
+Real-time audio-visual localization using ESP32-CAM and a dual-mic TDOA array for low-latency sound direction tracking.
+
+# Core DSP Algorithm (MATLAB)
+This is the key algorithm used to get the TDOA from the two microphone signals, $\mathbf{x}_1[n]$ and $\mathbf{x}_2[n]$, which you would port to the embedded C code after simulation.
+% MATLAB Code for TDOA Estimation (GCC-PHAT)
+
+% 1. Simulate two signals (replace with your actual input data)
+Fs = 44100;     % Sampling Frequency (Hz)
+delay_samples = 15; % True TDOA: 15 samples
+t = 0:1/Fs:0.1;
+
+% Generate a simple noise burst signal
+source_signal = chirp(t, 1000, 0.1, 5000); 
+
+% Add noise
+noise1 = 0.1 * randn(size(source_signal));
+noise2 = 0.1 * randn(size(source_signal));
+
+% Mic 1: Signal + Noise
+x1 = source_signal + noise1; 
+
+% Mic 2: Delayed Signal + Noise
+x2 = [zeros(1, delay_samples), source_signal(1:end-delay_samples)] + noise2;
+
+% --- GCC-PHAT IMPLEMENTATION ---
+
+% 2. Compute the cross-power spectral density (Psd)
+X1 = fft(x1);
+X2 = fft(x2);
+
+% Cross-power spectral density (S_12)
+S_12 = X1 .* conj(X2);
+
+% 3. Apply the PHAT Weighting
+% PHAT: Divide by the magnitude of S_12 to "whiten" the signal (improve noise immunity)
+G_phat = 1 ./ abs(S_12); 
+G_phat(isinf(G_phat)) = 0; % Handle potential division by zero
+
+% 4. Compute the GCC-PHAT function (Inverse FFT of the weighted Psd)
+R_phat = ifft(G_phat .* S_12);
+
+% 5. Find the lag (TDOA) corresponding to the maximum correlation
+[max_corr, max_index] = max(abs(R_phat));
+
+% Convert index to time delay (lag) relative to the center of the cross-correlation
+N = length(R_phat);
+lags = (-N/2 : N/2-1) / Fs; % Time axis for correlation
+max_lag_time = lags(max_index); % TDOA in seconds
+
+% Convert TDOA to Angle of Arrival (AOA)
+% Assuming speed of sound (c) = 343 m/s and mic spacing (d)
+c = 343; % m/s
+d = 0.05; % e.g., 5 cm mic spacing (m)
+
+% AOA calculation: TDOA = (d * sin(theta)) / c
+% theta = asin((TDOA * c) / d)
+theta_rad = asin((max_lag_time * c) / d);
+theta_deg = rad2deg(theta_rad);
+
+fprintf('Calculated TDOA: %.6f seconds\n', max_lag_time);
+fprintf('Calculated AOA: %.2f degrees\n', theta_deg);
+
+%
+
