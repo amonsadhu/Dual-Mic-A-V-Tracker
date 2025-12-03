@@ -1,0 +1,90 @@
+# Host PC Synchronization (Python/OpenCV)
+This Python script runs on the PC, listens to the serial data from the ESP32 (the AOA), reads the live video stream from the ESP32-CAM (via Wi-Fi/RTSP or a separate USB camera), and draws the localization result onto the video feed.
+# Python Script for Video Synchronization and Visualization
+
+import cv2
+import serial
+import time
+import re
+
+# --- Configuration ---
+# ESP32 Serial Port (Change 'COMX' to your actual port name, e.g., '/dev/ttyUSB0')
+SERIAL_PORT = 'COM3' 
+BAUD_RATE = 115200
+# ESP32-CAM Video Stream URL (RTSP/MJPEG)
+VIDEO_STREAM_URL = 'http://192.168.1.10/mjpeg/1' 
+
+# Initialize Serial Communication
+ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
+print(f"Connected to Serial Port: {SERIAL_PORT}")
+
+# Initialize Video Capture (for ESP32-CAM stream)
+cap = cv2.VideoCapture(VIDEO_STREAM_URL)
+if not cap.isOpened():
+    print(f"Error: Could not open video stream at {VIDEO_STREAM_URL}")
+    exit()
+
+# Global variable for the last received AOA
+current_aoa = 0.0
+
+# Function to draw the AOA direction line on the frame
+def draw_aoa(frame, angle_deg):
+    (h, w) = frame.shape[:2]
+    center = (w // 2, h) # Sound source is usually tracked from the bottom center of the frame
+    
+    # Normalize angle: 0 deg is straight ahead (up), +/- 90 is left/right
+    # Convert to standard Cartesian angle (0 deg = right, 90 deg = up)
+    # 0 (straight) -> 90 deg, -90 (left) -> 180 deg, 90 (right) -> 0 deg
+    cartesian_angle = 90 - angle_deg
+    
+    # Calculate the end point of the line
+    line_length = h // 4 # Line length proportional to frame height
+    angle_rad = (cartesian_angle * cv2.PI) / 180.0
+    
+    end_x = int(center[0] + line_length * cv2.cos(angle_rad))
+    end_y = int(center[1] - line_length * cv2.sin(angle_rad)) # Subtracted because y=0 is top
+    
+    # Draw the line
+    cv2.line(frame, center, (end_x, end_y), (0, 0, 255), 3) # Red line
+    # Draw text
+    cv2.putText(frame, f"AOA: {angle_deg:.1f} deg", (10, 30), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+    
+    return frame
+
+# Main loop
+while True:
+    # 1. Read AOA from Serial Port
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        # Regex to parse the AOA value (e.g., AOA:-45.000000)
+        match = re.search(r"AOA:(-?\d+\.\d+)", line)
+        if match:
+            current_aoa = float(match.group(1))
+            print(f"Received AOA: {current_aoa:.2f} deg")
+    except Exception as e:
+        # print(f"Serial Error: {e}")
+        pass
+
+    # 2. Read Video Frame
+    ret, frame = cap.read()
+    if not ret:
+        print("Error reading video frame. Retrying...")
+        time.sleep(0.1)
+        continue
+
+    # 3. Synchronize and Visualize
+    if frame is not None:
+        # Overlay the last received AOA onto the current frame
+        frame_with_aoa = draw_aoa(frame, current_aoa)
+        
+        cv2.imshow('Real-Time Audio-Visual Localization', frame_with_aoa)
+
+    # 4. Exit on 'q'
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Cleanup
+cap.release()
+cv2.destroyAllWindows()
+ser.close()
